@@ -51,6 +51,9 @@ buildGoModule (finalAttrs: {
       --replace-fail '/bin/cat' '${lib.getExe' coreutils "cat"}'
     substituteInPlace internal/library/rtk_test.go \
       --replace-fail '/bin/mkdir' '${lib.getExe' coreutils "mkdir"}'
+    # The test narrows PATH to /usr/bin:/bin, which has no sleep in the sandbox.
+    substituteInPlace internal/gui/providers_fetching_unix_test.go \
+      --replace-fail 'sleep 4' '${lib.getExe' coreutils "sleep"} 4'
     # Only exclude dependencies added by buildGoModule from the source policy scan.
     substituteInPlace internal/proc/proc_test.go \
       --replace-fail 'd.Name() == "node_modules"' 'd.Name() == "node_modules" || d.Name() == "vendor"'
