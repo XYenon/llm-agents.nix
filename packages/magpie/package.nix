@@ -29,13 +29,15 @@ buildGoModule (finalAttrs: {
 
   vendorHash = "sha256-XEaHZVw3co0yUV6fLUlSkvg9LlroKFj2B2sjMW1e6BU=";
 
-  # Keep desktop links and autostart on the GApp wrapper, not the inner binary.
-  patches = lib.optionals stdenv.hostPlatform.isLinux [
-    ./linux-launcher.patch
-  ];
   postPatch = lib.optionalString stdenv.hostPlatform.isLinux ''
-    substituteInPlace internal/autostart/autostart.go internal/autostart/launcher_linux_test.go \
-      --replace-fail '@magpie@' "$out/bin/magpie"
+    # os.Executable() is .magpie-wrapped, which lacks the GApps environment.
+    substituteInPlace internal/autostart/autostart.go \
+      --replace-fail 'exe, err := os.Executable()' 'exe, err := "'"$out"'/bin/magpie", error(nil)'
+    # We ship the desktop entry for magpie:// links. One written to
+    # ~/.local/share at startup would shadow it.
+    rm internal/gui/scheme_linux.go
+    substituteInPlace internal/gui/scheme_other.go \
+      --replace-fail '!windows && !linux' '!windows'
   '';
 
   subPackages = [ "." ];
@@ -54,23 +56,17 @@ buildGoModule (finalAttrs: {
     # The test narrows PATH to /usr/bin:/bin, which has no sleep in the sandbox.
     substituteInPlace internal/gui/providers_fetching_unix_test.go \
       --replace-fail 'sleep 4' '${lib.getExe' coreutils "sleep"} 4'
-    # Only exclude dependencies added by buildGoModule from the source policy scan.
+    # The source policy scan must not descend into buildGoModule's vendor/.
     substituteInPlace internal/proc/proc_test.go \
       --replace-fail 'd.Name() == "node_modules"' 'd.Name() == "node_modules" || d.Name() == "vendor"'
-  ''
-  + lib.optionalString stdenv.hostPlatform.isDarwin ''
-    # Keep script generation and cancellation assertions even without osascript.
-    substituteInPlace internal/update/admin_test.go \
-      --replace-fail '// AppleScript unescapes it back to the script' \
-        'if _, err := exec.LookPath("osascript"); err != nil {
-          t.Skip("AppleScript interpreter is unavailable in the build sandbox")
-        }
-        // AppleScript unescapes it back to the script'
   '';
+  # plutil
   nativeCheckInputs = lib.optionals stdenv.hostPlatform.isDarwin [ xcbuild ];
+  # The default only tests subPackages, which has none of the logic.
   checkPhase = ''
     runHook preCheck
-    go test -tags=${lib.concatStringsSep "," finalAttrs.tags} ./...
+    go test -tags=${lib.concatStringsSep "," finalAttrs.tags} \
+      ${lib.optionalString stdenv.hostPlatform.isDarwin "-skip='^TestAsAdmin$'"} ./...
     runHook postCheck
   '';
 
